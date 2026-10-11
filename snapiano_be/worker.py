@@ -21,7 +21,9 @@ from supabase import create_client
 
 from .bundle import build_lines
 from .cleaning import clean
+from .diagnostics import build_diagnostics
 from .score_to_json import analyze, to_app_json
+from .upload_guard import ScanError, decode_upload
 from .timeline import read_timeline
 
 POLL_SECONDS = 3
@@ -49,28 +51,35 @@ def png_bytes(img: np.ndarray) -> bytes:
 
 
 def process(scan: dict) -> None:
-    photo = cv2.imdecode(np.frombuffer(db.storage.from_("scans").download(scan["image_path"]), np.uint8), cv2.IMREAD_COLOR)
-    if photo is None:
-        raise ValueError("unreadable image")
+    photo = decode_upload(db.storage.from_("scans").download(scan["image_path"]))
     page, info = clean(photo)
     if not info.systems:
-        raise ValueError("no staves found")
+        raise ScanError("no_staves", f"{photo.shape[1]}x{photo.shape[0]} px, page_found={info.page_found}")
 
     with tempfile.TemporaryDirectory() as tmp:
         clean_png = Path(tmp) / "page.png"
         cv2.imwrite(str(clean_png), page)
-        subprocess.run(["homr", str(clean_png)], check=True, capture_output=True, timeout=600)  # AGPL: separate process
+        try:
+            subprocess.run(["homr", str(clean_png)], check=True, capture_output=True, text=True, timeout=600)  # AGPL: separate process
+        except subprocess.CalledProcessError as e:
+            raise ScanError("homr_failed", f"exit {e.returncode}, stderr tail: {(e.stderr or '')[-300:]}") from e
+        except subprocess.TimeoutExpired as e:
+            raise ScanError("homr_timeout", "homr exceeded 600 s") from e
         xml = clean_png.with_suffix(".musicxml")
         notes = read_timeline(str(xml))
-        summary, events, _ = analyze(xml)
+        summary, events, score = analyze(xml)
     if not notes:
-        raise ValueError("no notes read")
+        raise ScanError("no_notes", f"homr returned no notes for a {page.shape[1]}x{page.shape[0]} page")
 
     images, marks = build_lines(page, info.systems, notes)
     app = to_app_json(summary, events)
     app["notes"] = marks  # the app needs positions on the line images, not the plain events
+    app["diagnostics"] = build_diagnostics(summary)  # additive: per-bar expected vs found, for the developer view
 
-    piece_id = db.table("pieces").insert({"user_id": scan["user_id"]}).execute().data[0]["id"]
+    meta = score.metadata
+    title = (getattr(meta, "title", None) or "").strip() if meta else ""
+    composer = (getattr(meta, "composer", None) or "").strip() if meta else ""
+    piece_id = db.table("pieces").insert({"user_id": scan["user_id"], "title": title, "composer": composer}).execute().data[0]["id"]
     app["lines"] = []
     for i, img in enumerate(images, 1):
         path = f"{scan['user_id']}/{piece_id}/line{i:02d}.png"
@@ -92,10 +101,12 @@ def main() -> None:
             continue
         try:
             process(scan)
-        except Exception as e:  # any failure -> the app shows "couldn't read this page"
+        except Exception as e:
+            # The app only ever sees the stable code; the detail and traceback stay in this server log.
+            code = e.code if isinstance(e, ScanError) else "unexpected"
+            print(f"scan {scan['id']} failed: {code}: {getattr(e, 'detail', '') or e}")
             traceback.print_exc()
-            db.table("scans").update({"status": "failed", "error": str(e)[:500]}).eq("id", scan["id"]).execute()
-
+            db.table("scans").update({"status": "failed", "error": code}).eq("id", scan["id"]).execute()
 
 if __name__ == "__main__":
     main()

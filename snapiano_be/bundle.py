@@ -4,6 +4,7 @@ from __future__ import annotations
 import numpy as np
 
 from .cleaning import find_staves, snap_to_noteheads, straighten_band_with_shift
+from .diagnostics import note_name
 from .timeline import TimedNote
 
 
@@ -24,7 +25,7 @@ def build_lines(page: np.ndarray, systems: list[list[int]], notes: list[TimedNot
             else:
                 exact.append((n.x, n.y - y0 + float(shift[min(max(n.x, 0), img.shape[1] - 1)])))
         for n, (x, y) in zip(here, snap_to_noteheads(img, exact, spacing)):
-            data.append({"m": n.midi, "s": n.start, "d": n.dur, "h": n.hand, "line": i,
+            data.append({"m": n.midi, "s": n.start, "d": n.dur, "h": n.hand, "line": i, "b": n.measure, "n": note_name(n.midi, n.diatonic),
                          "x": round(float(x), 1), "y": round(float(y), 1)})
     data.sort(key=lambda d: (d["s"], d["m"]))
     return images, data
