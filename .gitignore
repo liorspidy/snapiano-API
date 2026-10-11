@@ -2,10 +2,10 @@
 __pycache__/
 *.pyc
 .venv/
-BE/results/
-BE/out/
-BE/data/piano_samples/
-BE/pages/*
-!BE/pages/.keep
+results/
+out/
+data/piano_samples/
+pages/*
+!pages/.keep
 .env
 .env.*
