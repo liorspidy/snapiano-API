@@ -24,7 +24,7 @@ import cv2
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
-from snapiano_be.cleaning import find_staves, snap_to_noteheads, straighten_band_with_shift  # noqa: E402
+from snapiano_be.bundle import build_lines  # noqa: E402
 from snapiano_be.timeline import read_timeline  # noqa: E402
 
 LISTEN_JS = HERE.parent.parent / "FE" / "src" / "audio" / "listen.js"
@@ -33,27 +33,14 @@ LISTEN_JS = HERE.parent.parent / "FE" / "src" / "audio" / "listen.js"
 def build(page_png: Path, clean_json: Path, musicxml: Path, out: Path) -> None:
     page = cv2.imread(str(page_png), cv2.IMREAD_GRAYSCALE)
     systems = json.loads(clean_json.read_text())["systems"]
-    notes = [n for n in read_timeline(str(musicxml)) if n.x is not None]
+    notes = read_timeline(str(musicxml))
 
-    lines, data = [], []
-    for i, (y0, y1) in enumerate(systems):
-        img, shift = straighten_band_with_shift(page[y0:y1])
+    images, data = build_lines(page, systems, notes)
+    lines = []
+    for img in images:
         ok, buf = cv2.imencode(".png", img)
         lines.append({"src": "data:image/png;base64," + base64.b64encode(buf).decode(),
                       "w": img.shape[1], "h": img.shape[0]})
-        here = [n for n in notes if y0 <= n.y < y1]
-        staves, spacing = find_staves(img)
-        exact = []
-        for n in here:
-            if len(staves) >= n.staff:  # y from the pitch itself: exact line or space on that staff
-                bottom = staves[n.staff - 1][1]
-                exact.append((n.x, bottom - (n.diatonic - n.bottom_line) * spacing / 2))
-            else:
-                exact.append((n.x, n.y - y0 + float(shift[min(max(n.x, 0), img.shape[1] - 1)])))
-        for n, (x, y) in zip(here, snap_to_noteheads(img, exact, spacing)):
-            data.append({"m": n.midi, "s": n.start, "d": n.dur, "h": n.hand, "line": i,
-                         "x": round(float(x), 1), "y": round(float(y), 1)})
-    data.sort(key=lambda d: (d["s"], d["m"]))
     listen_js = LISTEN_JS.read_text(encoding="utf-8")
     html = (TEMPLATE.replace("__LINES__", json.dumps(lines))
             .replace("__NOTES__", json.dumps(data))

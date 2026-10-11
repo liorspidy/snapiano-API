@@ -6,3 +6,4 @@ opencv-python-headless>=4.8
 numpy
 verovio>=5
 soundfile  # tools/listen_check.py (reading piano samples)
+supabase>=2   # snapiano_be/worker.py
