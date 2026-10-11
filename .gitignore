@@ -1,0 +1,11 @@
+.DS_Store
+__pycache__/
+*.pyc
+.venv/
+BE/results/
+BE/out/
+BE/data/piano_samples/
+BE/pages/*
+!BE/pages/.keep
+.env
+.env.*

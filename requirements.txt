@@ -1,0 +1,8 @@
+# homr from GitHub: the PyPI release (0.7.0) doesn't write note positions on the photo,
+# which the review screen needs. It also read our test page better.
+homr[cpu] @ git+https://github.com/liebharc/homr
+music21>=9
+opencv-python-headless>=4.8
+numpy
+verovio>=5
+soundfile  # tools/listen_check.py (reading piano samples)
